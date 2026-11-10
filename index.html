@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ICU / NCLS Clinical Simulation Monitor</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100vw; height: 100vh; overflow: hidden; background-color: #030712; color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none; -webkit-user-select: none;
+    }
+    .font-mono { font-family: "Courier New", Courier, monospace; letter-spacing: -0.03em; }
+    .hidden { display: none !important; }
+
+    /* モーダル */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,0.88);
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-card {
+      background: #111827; border: 1px solid #374151; border-radius: 14px;
+      max-width: 540px; width: 100%; padding: 20px; color: #f3f4f6;
+    }
+
+    /* ================= iPad 受講者モニター画面 ================= */
+    #monitorView { width: 100%; height: 100%; display: flex; flex-direction: row; background: #1e293b; }
+
+    .monitor-bezel {
+      flex: 1; display: flex; flex-direction: column; background: #000;
+      border: 5px solid #334155; border-radius: 10px; margin: 6px; overflow: hidden; min-width: 0;
+    }
+    .top-bar {
+      height: 38px; background: #0f172a; border-bottom: 1px solid #1e293b;
+      display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font-size: 12px; flex-shrink: 0;
+    }
+    .alarm-banner {
+      padding: 2px 10px; border-radius: 4px; font-weight: 900; font-size: 13px;
+    }
+    .alarm-red { background: #dc2626; color: #fff; animation: blinkRed 0.6s infinite alternate; }
+    @keyframes blinkRed { from { opacity: 1; } to { opacity: 0.25; } }
+
+    .main-screen { flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
+
+    /* 波形エリア（高さを均等配分しCanvasサイズ崩れを防止） */
+    .wave-area {
+      flex: 1; display: flex; flex-direction: column; background: #000; min-width: 0; min-height: 0;
+      background-size: 25px 25px;
+      background-image: linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px);
+    }
+    .wave-box {
+      flex: 1; position: relative; border-bottom: 1px solid #1f2937;
+      width: 100%; min-height: 0; overflow: hidden;
+    }
+    .wave-label {
+      position: absolute; top: 4px; left: 10px; z-index: 10;
+      font-size: 11px; font-weight: bold; pointer-events: none;
+    }
+    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+
+    /* 右側 バイタル数値パネル */
+    .num-panel {
+      width: 250px; background: #05070a; border-left: 2px solid #1e293b;
+      display: flex; flex-direction: column; padding: 4px; gap: 4px; flex-shrink: 0;
+    }
+    .param-box {
+      background: #0b111e; border-radius: 6px; padding: 4px 10px;
+      display: flex; flex-direction: column; justify-content: center; flex: 1; min-height: 0;
+    }
+    .val-huge { font-size: 46px; font-weight: 900; line-height: 0.95; }
+    .val-large { font-size: 28px; font-weight: 900; line-height: 1.0; }
+
+    /* 下部ファンクションバー */
+    .bottom-func-bar {
+      height: 52px; background: #1e293b; border-top: 2px solid #334155;
+      display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; gap: 6px; flex-shrink: 0;
+    }
+    .func-btn {
+      flex: 1; height: 42px; background: #0f172a; border: 1px solid #475569; border-radius: 6px;
+      color: #e2e8f0; font-size: 11px; font-weight: bold; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .func-btn.muted { border-color: #eab308; color: #fde047; }
+
+    /* 実機風 除細動器＆ペーシング物理パネル */
+    .defib-hardware-panel {
+      width: 255px; background: #d1d5db; color: #111827; margin: 6px 6px 6px 0;
+      border-radius: 10px; padding: 8px; display: flex; flex-direction: column; justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .hw-section { background: #e5e7eb; border: 1px solid #9ca3af; border-radius: 8px; padding: 6px; }
+    .energy-display {
+      background: #0f172a; color: #38bdf8; border: 3px solid #334155; border-radius: 50%;
+      width: 96px; height: 96px; margin: 2px auto; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; font-weight: 900;
+    }
+    .hw-charge-btn {
+      width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #ca8a04;
+      background: linear-gradient(to bottom, #fde047, #eab308); color: #111827;
+      font-size: 15px; font-weight: 900; cursor: pointer;
+    }
+    .hw-shock-btn {
+      width: 100%; padding: 14px; border-radius: 8px; border: 2px solid #991b1b;
+      background: linear-gradient(to bottom, #fca5a5, #ef4444); color: #fff;
+      font-size: 16px; font-weight: 900; cursor: pointer; opacity: 0.4;
+    }
+    .hw-shock-btn.ready { opacity: 1; background: #dc2626; animation: pulseShock 0.5s infinite alternate; }
+    @keyframes pulseShock { from { box-shadow: 0 0 6px #ef4444; } to { box-shadow: 0 0 20px #ff0000; } }
+
+    /* ================= スマホ指導者リモコン ================= */
+    #controllerView { width: 100%; height: 100%; display: flex; flex-direction: column; background: #0b0f17; }
+    .ctrl-scroll { flex: 1; overflow-y: auto; padding: 10px 10px 76px 10px; -webkit-overflow-scrolling: touch; }
+    .tab-bar { display: flex; gap: 4px; border-bottom: 2px solid #334155; margin-bottom: 10px; overflow-x: auto; }
+    .tab-btn {
+      padding: 8px 10px; background: #1e293b; color: #94a3b8; border: none; border-radius: 6px 6px 0 0;
+      font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;
+    }
+    .tab-btn.active { background: #2563eb; color: #fff; }
+    .card { background: #151d2a; border: 1px solid #2d3748; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+    .btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 6px; }
+    button.action-btn {
+      padding: 8px 4px; border-radius: 7px; border: 1px solid #475569; background: #1e293b;
+      color: #f1f5f9; font-size: 12px; font-weight: bold; cursor: pointer; text-align: center;
+    }
+    .btn-active { background: #059669 !important; border-color: #10b981 !important; color: #fff !important; }
+    .btn-alert { background: rgba(185, 28, 28, 0.4); border-color: #ef4444; color: #fca5a5; }
+    .btn-iabp { background: rgba(88, 28, 135, 0.4); border-color: #a855f7; color: #e9d5ff; }
+
+    .slider-box { margin-bottom: 10px; }
+    .slider-title { display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+    input[type=range] { width: 100%; height: 6px; background: #334155; border-radius: 3px; outline: none; -webkit-appearance: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #38bdf8; }
+
+    .ctrl-bottom-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: #0f172a;
+      border-top: 2px solid #334155; display: flex; gap: 6px; padding: 6px 10px; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1. 起動時選択モーダル -->
+  <div id="setupModal" class="modal-overlay">
+    <div class="modal-card" style="text-align:center; max-width:400px;">
+      <div style="font-size: 30px; margin-bottom: 6px;">🩺</div>
+      <h2 style="font-size: 18px; font-weight: bold;">ICU Simulation Monitor</h2>
+      <p style="font-size: 12px; color: #94a3b8; margin: 8px 0 16px;">使用する端末の役割を選択してください</p>
+      
+      <button class="action-btn btn-active" style="width: 100%; padding: 14px; margin-bottom: 10px; font-size: 15px;" onclick="initRole('monitor')">
+        📺 iPad/PC用：受講者モニター起動
+      </button>
+
+      <button class="action-btn" style="width: 100%; padding: 14px; background: #2563eb; font-size: 15px;" onclick="initRole('controller')">
+        📱 スマホ用：指導者リモコン起動
+      </button>
+
+      <div id="pinBox" class="hidden" style="margin-top: 16px; border-top: 1px solid #334155; padding-top: 12px;">
+        <p style="font-size: 12px; color: #60a5fa; margin-bottom: 6px;">モニター右上の【4桁PIN】を入力：</p>
+        <div style="display:flex; justify-content:center; gap:6px;">
+          <input type="number" id="inputPin" placeholder="1234" style="width: 110px; font-size: 22px; text-align: center; background: #000; border: 1px solid #3b82f6; border-radius: 6px; color: #fff;">
+          <button class="action-btn" style="background: #2563eb; padding: 0 16px;" onclick="connectRemote()">接続</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 検査・カルテ表示モーダル -->
+  <div id="clinicalModal" class="modal-overlay hidden" onclick="closeClinicalModal()">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #374151; padding-bottom:8px; margin-bottom:12px;">
+        <h3 id="modalTitle" style="font-size:16px; font-weight:bold; color:#38bdf8;">検査結果</h3>
+        <button class="action-btn" style="padding:4px 12px;" onclick="closeClinicalModal()">✕ 閉じる</button>
+      </div>
+      <div id="modalBody" style="font-size:14px; line-height:1.6;"></div>
+    </div>
+  </div>
+
+  <!-- ================= iPad 受講者モニター画面 ================= -->
+  <div id="monitorView" class="hidden">
+    <div class="monitor-bezel">
+      <div class="top-bar">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-weight: 900; color: #10b981;">ICU Bedside Monitor</span>
+          <span id="clockText" class="font-mono" style="font-weight: bold;">00:00:00</span>
+          <span style="font-size: 11px; color:#94a3b8;" id="simTimer">経過 00:00</span>
+          <span id="alarmBanner" class="alarm-banner alarm-red hidden">VF / VT</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div id="syncBadge" class="hidden" style="background:#059669; color:#fff; font-size:11px; font-weight:bold; padding:2px 6px; border-radius:4px;">SYNC</div>
+          <div id="pacingBadge" class="hidden" style="background:#2563eb; color:#fff; font-size:11px; font-weight:bold; padding:2px 6px; border-radius:4px;">一時ペーシング中</div>
+          <div id="iabpStatusTag" class="hidden" style="background:#581c87; border:1px solid #a855f7; color:#e9d5ff; font-size:11px; font-weight:bold; padding:2px 6px; border-radius:4px;">IABP 1:1</div>
+          <button class="action-btn" style="padding:3px 8px; font-size:11px;" onclick="toggleHardwarePanel()">除細動パネル切替</button>
+          <div id="connBadge" style="color: #eab308; font-weight: bold; font-size: 12px;">
+            PIN: <span id="displayPin" style="font-size: 13px; color: #fff; background: #334155; padding: 2px 6px; border-radius: 4px;">----</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-screen">
+        <!-- 波形エリア -->
+        <div class="wave-area">
+          <!-- 基本1: 心電図 -->
+          <div class="wave-box" id="boxECG">
+            <div class="wave-label font-mono" style="color: #10b981;">ECG II <span id="cprWaveBadge" class="hidden" style="background:#f59e0b; color:#000; padding:1px 6px; border-radius:3px; margin-left:6px;">CPR圧迫中</span></div>
+            <canvas id="ecgCanvas"></canvas>
+          </div>
+          <!-- 基本2: SpO2 -->
+          <div class="wave-box" id="boxPleth">
+            <div class="wave-label font-mono" style="color: #06b6d4;">SpO2 PLETH</div>
+            <canvas id="plethCanvas"></canvas>
+          </div>
+          <!-- 追加表示: 動脈圧 (ART) / IABP動脈圧波形 -->
+          <div class="wave-box hidden" id="boxART">
+            <div class="wave-label font-mono" style="color: #ef4444;">
+              ART (0-200 mmHg) <span id="iabpWaveSubLabel" class="hidden" style="color:#fde047; margin-left:8px;">[IABP補助波形: 拡張期Augmentation / 後負荷軽減]</span>
+            </div>
+            <canvas id="artCanvas"></canvas>
+          </div>
+          <!-- 追加表示: IABP バルーン内圧波形 -->
+          <div class="wave-box hidden" id="boxBalloon">
+            <div class="wave-label font-mono" style="color: #38bdf8;">IABP BALLOON PRESSURE</div>
+            <canvas id="balloonCanvas"></canvas>
+          </div>
+          <!-- 追加表示: EtCO2 カプノグラム -->
+          <div class="wave-box hidden" id="boxEtCO2">
+            <div class="wave-label font-mono" style="color: #facc15;">EtCO2 (0-50 mmHg)</div>
+            <canvas id="etco2Canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- 右側 数値パネル（基本：HR, NBP, SpO2, RR / 追加：ART, 膀胱温） -->
+        <div class="num-panel">
+          <!-- 基本: HR -->
+          <div class="param-box" style="border: 2px solid #065f46;">
+            <div style="display:flex; justify-content:space-between; color:#34d399; font-weight:bold; font-size:11px;">
+              <span>HR (心拍数)</span><span id="rhythmLabel">NSR</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span class="font-mono val-huge" style="color:#10b981;" id="valHR">75</span>
+              <span style="font-size:11px; color:#059669;">bpm</span>
+            </div>
+          </div>
+
+          <!-- 基本: SpO2 -->
+          <div class="param-box" style="border: 2px solid #164e63;">
+            <div style="display:flex; justify-content:space-between; color:#22d3ee; font-weight:bold; font-size:11px;">
+              <span>SpO2</span><span>%</span>
+            </div>
+            <div class="font-mono val-huge" style="color:#06b6d4;" id="valSpO2">98</div>
+          </div>
+
+          <!-- 基本: NBP (平均血圧つき) -->
+          <div class="param-box" style="border: 2px solid #334155;">
+            <div style="display:flex; justify-content:space-between; align-items:center; color:#cbd5e1; font-weight:bold; font-size:11px;">
+              <span>NBP (非観血血圧)</span>
+              <button onclick="measureNIBP()" style="background:#2563eb; border:none; color:#fff; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:bold; cursor:pointer;">測定</button>
+            </div>
+            <div class="font-mono val-large" style="color:#f8fafc; margin-top:2px;" id="valNIBP">-- / -- (--)</div>
+            <div style="font-size:10px; color:#94a3b8; text-align:right;">mmHg (平均)</div>
+          </div>
+
+          <!-- 追加表示: ART (動脈圧 + 平均血圧 + AUG) -->
+          <div class="param-box hidden" id="boxValART" style="border: 2px solid #7f1d1d;">
+            <div style="display:flex; justify-content:space-between; color:#f87171; font-weight:bold; font-size:11px;">
+              <span>ART (動脈圧)</span><span id="valAUG" class="hidden" style="color:#fde047;">AUG: 120</span>
+            </div>
+            <div class="font-mono val-large" style="color:#ef4444; margin-top:2px;">
+              <span id="valSys">120</span>/<span id="valDia">70</span> <span style="font-size:20px;" id="valMAP">(87)</span>
+            </div>
+            <div style="font-size:10px; color:#fca5a5; text-align:right;">mmHg (平均)</div>
+          </div>
+
+          <!-- 追加表示: EtCO2 -->
+          <div class="param-box hidden" id="boxValEtCO2" style="border: 2px solid #ca8a04;">
+            <div style="display:flex; justify-content:space-between; color:#facc15; font-weight:bold; font-size:11px;">
+              <span>EtCO2</span><span>mmHg</span>
+            </div>
+            <div class="font-mono val-large" style="color:#eab308;" id="valEtCO2">38</div>
+          </div>
+
+          <!-- 基本: 呼吸回数 (RR) ＆ 追加表示: 右下 膀胱温 (TEMP) -->
+          <div class="param-box" style="border: 2px solid #334155; flex-direction:row; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:11px; color:#e2e8f0; font-weight:bold;">RESP (呼吸数)</div>
+              <div class="font-mono" style="font-size:34px; font-weight:900; color:#f1f5f9;" id="valRR">16</div>
+            </div>
+            <!-- 膀胱温（追加ONのとき画面右下に表示） -->
+            <div id="boxValTemp" class="hidden" style="text-align:right; border-left:1px solid #334155; padding-left:10px;">
+              <div style="font-size:11px; color:#facc15; font-weight:bold;">膀胱温 (TEMP)</div>
+              <div class="font-mono" style="font-size:26px; font-weight:900; color:#fef08a;"><span id="valTemp">36.8</span>°C</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下部バー -->
+      <div class="bottom-func-bar">
+        <button class="func-btn" onclick="openClinicalModal('12lead')">📈 12誘導</button>
+        <button class="func-btn" onclick="openClinicalModal('bga')">💉 血液ガス</button>
+        <button class="func-btn" onclick="openClinicalModal('physical')">👁️ 身体所見</button>
+        <button class="func-btn" onclick="openClinicalModal('chart')">📋 カルテ</button>
+        <button class="func-btn" id="btnMuteAlarm" onclick="toggleMuteAlarm()">🔔 <span id="muteLabel">アラーム消音</span></button>
+      </div>
+    </div>
+
+    <!-- 実機除細動・一時ペーシングパネル -->
+    <div id="hardwarePanel" class="defib-hardware-panel">
+      <div class="hw-section" style="text-align:center;">
+        <div style="font-size:11px; font-weight:bold; color:#374151; text-align:left;">① エネルギー選択</div>
+        <div class="energy-display">
+          <div style="font-size:30px; line-height:1;" id="hwEnergyVal">150</div>
+          <div style="font-size:10px; color:#94a3b8;">JOULES</div>
+        </div>
+        <div style="display:flex; justify-content:center; gap:8px; margin-top:4px;">
+          <button class="action-btn" style="padding:4px 12px;" onclick="adjEnergy(-1)">◀ 減</button>
+          <button class="action-btn" style="padding:4px 12px;" onclick="adjEnergy(1)">増 ▶</button>
+        </div>
+      </div>
+
+      <div class="hw-section" style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:12px; font-weight:900;">同期 SYNC</span>
+        <button id="hwSyncBtn" class="action-btn" style="padding:5px 12px; background:#4b5563;" onclick="toggleSyncMode()">OFF</button>
+      </div>
+
+      <button class="hw-charge-btn" onclick="chargeDefib()">② 充電 CHARGE</button>
+      <button class="hw-shock-btn" id="hwShockBtn" onclick="deliverShock()" disabled>③ ショック SHOCK</button>
+
+      <div class="hw-section" style="background:#1f2937; color:#f3f4f6;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-size:11px; font-weight:bold; color:#60a5fa;">一時ペーシング</span>
+          <button id="hwPaceBtn" class="action-btn" style="padding:4px 10px; font-size:11px;" onclick="togglePacing()">開始</button>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; margin-bottom:4px;">
+          <span>レート: <strong id="hwPaceRate">70</strong> ppm</span>
+          <div>
+            <button class="action-btn" style="padding:2px 8px;" onclick="adjPaceRate(-5)">-5</button>
+            <button class="action-btn" style="padding:2px 8px;" onclick="adjPaceRate(5)">+5</button>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px;">
+          <span>出力: <strong id="hwPaceCurrent">50</strong> mA</span>
+          <div>
+            <button class="action-btn" style="padding:2px 8px;" onclick="adjPaceCurrent(-5)">-5</button>
+            <button class="action-btn" style="padding:2px 8px;" onclick="adjPaceCurrent(5)">+5</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= スマホ指導者リモコン画面 ================= -->
+  <div id="controllerView" class="hidden">
+    <div class="ctrl-scroll">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:14px; font-weight:bold; color:#38bdf8;">🎮 指導者リモコン</span>
+        <span id="ctrlStatus" style="font-size:11px; color:#eab308; font-weight:bold;">● 接続待機中</span>
+      </div>
+      <!-- リモコン上部プレビュー -->
+      <div class="card" style="padding:8px; display:flex; justify-content:space-around; text-align:center; background:#0f172a;">
+        <div><div style="font-size:10px; color:#34d399;">HR / 調律</div><div style="font-size:15px; font-weight:900;" id="miniHR">75 (NSR)</div></div>
+        <div><div style="font-size:10px; color:#f87171;">血圧 (平均)</div><div style="font-size:15px; font-weight:900;" id="miniBP">120/70 (87)</div></div>
+        <div><div style="font-size:10px; color:#22d3ee;">SpO2</div><div style="font-size:15px; font-weight:900;" id="miniSpO2">98%</div></div>
+      </div>
+
+      <!-- タブメニュー -->
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="showTab('rhythm', this)">🫀 バイタル・波形追加</button>
+        <button class="tab-btn" onclick="showTab('iabp', this)">💉 IABP・ペーシング</button>
+        <button class="tab-btn" onclick="showTab('clinical', this)">🧪 検査・所見</button>
+      </div>
+
+      <!-- タブ1: バイタル ＆ 追加表示切替 -->
+      <div id="tab-rhythm">
+        <!-- 追加モニター項目のON/OFF -->
+        <div class="card" style="border-color:#3b82f6;">
+          <div style="font-size:12px; color:#60a5fa; font-weight:bold; margin-bottom:6px;">➕ 追加モニタリング項目の表示切替</div>
+          <div class="btn-grid" style="grid-template-columns: repeat(3, 1fr);">
+            <button class="action-btn" id="btnToggleART" onclick="toggleOptionalDisplay('art')">📈 動脈圧(ART)<br><span style="font-size:10px;">OFF</span></button>
+            <button class="action-btn" id="btnToggleTemp" onclick="toggleOptionalDisplay('temp')">🌡️ 膀胱温(右下)<br><span style="font-size:10px;">OFF</span></button>
+            <button class="action-btn" id="btnToggleEtCO2" onclick="toggleOptionalDisplay('etco2')">🫁 EtCO2波形<br><span style="font-size:10px;">OFF</span></button>
+          </div>
+        </div>
+
+        <!-- バイタルスライダー（脈圧20以上自動維持） -->
+        <div class="card">
+          <div class="slider-box">
+            <div class="slider-title" style="color:#34d399;"><span>心拍数 (HR) ※ART・IABP連動</span><span id="dispHR">75 bpm</span></div>
+            <input type="range" min="0" max="220" value="75" id="rngHR" oninput="changeSingleParam('hr', this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-title" style="color:#f87171;">
+              <span>収縮期血圧 (Sys) ※脈圧20以上維持</span>
+              <span id="dispSys">120 mmHg</span>
+            </div>
+            <input type="range" min="40" max="240" value="120" id="rngSys" oninput="changeBP('sys', this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-title" style="color:#fca5a5;">
+              <span>拡張期血圧 (Dia) / 平均血圧(MAP): <strong id="dispMAP">87</strong></span>
+              <span id="dispDia">70 mmHg</span>
+            </div>
+            <input type="range" min="20" max="160" value="70" id="rngDia" oninput="changeBP('dia', this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-title" style="color:#22d3ee;"><span>SpO2</span><span id="dispSpO2">98 %</span></div>
+            <input type="range" min="40" max="100" value="98" id="rngSpO2" oninput="changeSingleParam('spo2', this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-title" style="color:#f1f5f9;"><span>呼吸回数 (RR)</span><span id="dispRR">16 /min</span></div>
+            <input type="range" min="0" max="50" value="16" id="rngRR" oninput="changeSingleParam('rr', this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-title" style="color:#fef08a;"><span>膀胱温 (TEMP)</span><span id="dispTemp">36.8 °C</span></div>
+            <input type="range" min="320" max="410" value="368" id="rngTemp" oninput="changeTemp(this.value)">
+          </div>
+        </div>
+
+        <!-- 心電図リズム選択 -->
+        <div class="card">
+          <div style="font-size:11px; color:#ef4444; font-weight:bold; margin-bottom:6px;">急変・致死性リズム</div>
+          <div class="btn-grid" style="margin-bottom:8px;">
+            <button class="action-btn btn-alert" onclick="setRhythm('VF')">VF (心室細動)</button>
+            <button class="action-btn btn-alert" onclick="setRhythm('VT')">VT (心室頻拍)</button>
+            <button class="action-btn btn-alert" onclick="setRhythm('PEA')">PEA (無脈性)</button>
+            <button class="action-btn" style="background:#000;" onclick="setRhythm('ASYSTOLE')">心静止</button>
+          </div>
+          <div style="font-size:11px; color:#38bdf8; font-weight:bold; margin-bottom:6px;">基本調律・房室ブロック</div>
+          <div class="btn-grid">
+            <button class="action-btn btn-active" onclick="setRhythm('NSR')">洞調律 (NSR)</button>
+            <button class="action-btn" onclick="setRhythm('AF')">心房細動 (AF)</button>
+            <button class="action-btn" onclick="setRhythm('STE')">ST上昇</button>
+            <button class="action-btn" onclick="setRhythm('WENCKE')">Wenckebach</button>
+            <button class="action-btn" onclick="setRhythm('MOBITZ2')">Mobitz II型</button>
+            <button class="action-btn" style="border-color:#f59e0b; color:#fde68a;" onclick="setRhythm('3AVB')">完全房室ブロック</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- タブ2: IABP ＆ 一時ペーシング -->
+      <div id="tab-iabp" class="hidden">
+        <div class="card" style="border-color:#a855f7;">
+          <div style="font-size:12px; color:#c084fc; font-weight:bold; margin-bottom:6px;">💉 IABP アシスト比（ONでART＆IABP波形を自動表示）</div>
+          <div class="btn-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:10px;">
+            <button class="action-btn btn-active" id="btn-ratio-off" onclick="setIABPRatio('OFF')">OFF</button>
+            <button class="action-btn btn-iabp" id="btn-ratio-11" onclick="setIABPRatio('1:1')">1 : 1</button>
+            <button class="action-btn btn-iabp" id="btn-ratio-12" onclick="setIABPRatio('1:2')">1 : 2</button>
+            <button class="action-btn btn-iabp" id="btn-ratio-13" onclick="setIABPRatio('1:3')">1 : 3</button>
+          </div>
+          <div style="font-size:12px; color:#fca5a5; font-weight:bold; margin-bottom:6px;">IABP タイミング設定</div>
+          <div class="btn-grid">
+            <button class="action-btn btn-active" onclick="setTimingAnomaly('NORMAL')">正常タイミング</button>
+            <button class="action-btn btn-alert" onclick="setTimingAnomaly('EARLY_INF')">早期膨張</button>
+            <button class="action-btn btn-alert" onclick="setTimingAnomaly('LATE_INF')">遅延膨張</button>
+            <button class="action-btn btn-alert" onclick="setTimingAnomaly('EARLY_DEF')">早期脱血</button>
+            <button class="action-btn btn-alert" onclick="setTimingAnomaly('LATE_DEF')">遅延脱血</button>
+          </div>
+        </div>
+
+        <div class="card" style="border-color:#2563eb;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:12px; color:#60a5fa; font-weight:bold;">🫀 一時ペーシング（心室ペーシング波形）</span>
+            <button class="action-btn" id="ctrlPaceBtn" style="padding:6px 14px;" onclick="togglePacing()">開始 / 停止</button>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:12px;">
+            <span>ペーシングレート: <strong id="ctrlPaceRate">70</strong> ppm</span>
+            <div>
+              <button class="action-btn" style="padding:4px 10px;" onclick="adjPaceRate(-5)">-5</button>
+              <button class="action-btn" style="padding:4px 10px;" onclick="adjPaceRate(5)">+5</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- タブ3: 検査・所見 -->
+      <div id="tab-clinical" class="hidden">
+        <div class="card">
+          <div style="font-size:12px; color:#38bdf8; font-weight:bold; margin-bottom:6px;">💉 血液ガスプリセット</div>
+          <div class="btn-grid" style="margin-bottom:10px;">
+            <button class="action-btn" onclick="applyBGA('NORMAL')">正常BGA</button>
+            <button class="action-btn btn-alert" onclick="applyBGA('ACIDOSIS')">乳酸アシドーシス</button>
+            <button class="action-btn btn-alert" onclick="applyBGA('HYPERK')">高K血症</button>
+          </div>
+          <div style="font-size:12px; color:#a855f7; font-weight:bold; margin-bottom:6px;">👁️ 身体所見・カルテ更新</div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <input type="text" id="inpPhysical" value="呼吸音：両側清 / 心音：整 / 瞳孔：両側 3.0mm 対光反射(＋/＋)" style="padding:8px; background:#000; border:1px solid #475569; color:#fff; border-radius:6px; font-size:12px;">
+            <textarea id="inpChart" rows="3" style="padding:8px; background:#000; border:1px solid #475569; color:#fff; border-radius:6px; font-size:12px;">【経過記録】ICU入室後、モニター監視中。</textarea>
+            <button class="action-btn btn-active" onclick="updateClinicalInfo()">モニターへ反映</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- スマホ下部固定バー -->
+    <div class="ctrl-bottom-bar">
+      <button class="action-btn" id="btnCPR" style="flex:1; font-size:12px;" onclick="toggleCPR()">👐 CPR 停止中</button>
+      <button class="action-btn btn-active" id="btnPulse" style="flex:1; font-size:12px;" onclick="togglePulse()">💓 脈あり</button>
+    </div>
+  </div>
+<script>
+    const ENERGY_STEPS = [2, 5, 10, 20, 30, 50, 70, 100, 150, 200, 270];
+    const state = {
+      // 基本表示項目
+      hr: 75, spo2: 98, sys: 120, dia: 70, rr: 16, temp: 36.8,
+      rhythm: 'NSR', hasPulse: true, cprActive: false,
+
+      // 追加表示項目のON/OFFフラグ（初期は基本項目のみ表示）
+      artEnabled: false,
+      tempEnabled: false,
+      etco2Enabled: false,
+      etco2: 38,
+
+      // IABP設定
+      iabpRatio: 'OFF', // 'OFF', '1:1', '1:2', '1:3'
+      iabpTiming: 'NORMAL',
+
+      // 除細動＆一時ペーシング
+      energyIdx: 8, isCharged: false, syncMode: false,
+      shockCount: 0, isShocking: false, shockArtifactTime: 0,
+      pacingActive: false, paceRate: 70, paceCurrent: 50,
+      alarmMuted: false,
+
+      // 検査データ
+      bga: { ph: '7.40', paco2: '40', pao2: '98', hco3: '24.0', be: '0.0', lac: '1.1', k: '4.2', glu: '108' },
+      physicalText: '呼吸音：両側清 / 心音：整 / 瞳孔：両側 3.0mm 対光反射(＋/＋)',
+      chartText: '【経過記録】ICU入室後、モニター監視中。',
+
+      // 内部波形位相（心拍数・ペーシングレートと完全連動）
+      cardiacPhase: 0,
+      ventriclePhase: 0,
+      respPhase: 0,
+      sweepX: 0,
+      beatCounter: 0,
+      wenckCounter: 0,
+      mobitzCounter: 0,
+      lastHadQRS: true
+    };
+
+    let peer = null, conn = null, audioCtx = null;
+    let simSeconds = 0;
+
+    // 平均血圧 (MAP) 計算関数
+    function calcMAP(sys, dia) {
+      return Math.round(dia + (sys - dia) / 3);
+    }
+
+    // サウンドエンジン
+    function initAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+    function playBeep(freq = 880, dur = 0.05, type = 'sine', vol = 0.06) {
+      if (!audioCtx || state.alarmMuted) return;
+      const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+      osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      g.gain.setValueAtTime(vol, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + dur);
+    }
+
+    function initRole(role) {
+      initAudio();
+      if (role === 'monitor') {
+        document.getElementById('setupModal').classList.add('hidden');
+        document.getElementById('monitorView').classList.remove('hidden');
+        setupMonitor();
+      } else {
+        document.getElementById('pinBox').classList.remove('hidden');
+      }
+    }
+
+    function setupMonitor() {
+      const pin = Math.floor(1000 + Math.random() * 9000).toString();
+      document.getElementById('displayPin').innerText = pin;
+      peer = new Peer('icu-sim-' + pin);
+      peer.on('connection', (c) => {
+        conn = c;
+        document.getElementById('connBadge').innerHTML = '<span style="color:#10b981;">● LINKED</span>';
+        conn.on('data', (d) => {
+          Object.assign(state, d);
+          refreshMonitorLayoutAndUI();
+        });
+      });
+      refreshMonitorLayoutAndUI();
+      setTimeout(setupCanvases, 60);
+      setInterval(tickTimer, 1000);
+      requestAnimationFrame(mainDrawLoop);
+    }
+
+    function connectRemote() {
+      const pin = document.getElementById('inputPin').value.trim();
+      if (!pin) return;
+      document.getElementById('setupModal').classList.add('hidden');
+      document.getElementById('controllerView').classList.remove('hidden');
+      peer = new Peer();
+      peer.on('open', () => {
+        conn = peer.connect('icu-sim-' + pin);
+        conn.on('open', () => {
+          document.getElementById('ctrlStatus').innerText = '● 接続完了';
+          document.getElementById('ctrlStatus').style.color = '#10b981';
+          sync();
+        });
+        conn.on('data', (d) => { Object.assign(state, d); refreshControllerUI(); });
+      });
+    }
+
+    function sync() {
+      refreshMonitorLayoutAndUI();
+      refreshControllerUI();
+      if (conn && conn.open) conn.send(state);
+    }
+
+    function showTab(id, btn) {
+      ['rhythm', 'iabp', 'clinical'].forEach(t => document.getElementById('tab-' + t).classList.add('hidden'));
+      document.getElementById('tab-' + id).classList.remove('hidden');
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+
+    // ★脈圧20mmHg以上を常に維持する血圧変更ロジック（Sys 80 / Dia 100 などの逆転防止）
+    function changeBP(type, rawVal) {
+      let val = parseInt(rawVal);
+      if (type === 'sys') {
+        if (val < 40) val = 40;
+        state.sys = val;
+        // 脈圧20未満になる場合は拡張期血圧を自動で引き下げる
+        if (state.sys - state.dia < 20) {
+          state.dia = Math.max(20, state.sys - 20);
+          document.getElementById('rngDia').value = state.dia;
+        }
+      } else if (type === 'dia') {
+        if (val > 160) val = 160;
+        state.dia = val;
+        // 脈圧20未満になる場合は収縮期血圧を自動で引き上げる
+        if (state.sys - state.dia < 20) {
+          state.sys = Math.min(240, state.dia + 20);
+          document.getElementById('rngSys').value = state.sys;
+        }
+      }
+      document.getElementById('dispSys').innerText = state.sys + ' mmHg';
+      document.getElementById('dispDia').innerText = state.dia + ' mmHg';
+      document.getElementById('dispMAP').innerText = calcMAP(state.sys, state.dia);
+      sync();
+    }
+
+    function changeSingleParam(key, val) {
+      state[key] = parseInt(val);
+      const mapUnit = { hr:' bpm', spo2:' %', rr:' /min' };
+      const dispMap = { hr:'dispHR', spo2:'dispSpO2', rr:'dispRR' };
+      if (dispMap[key]) document.getElementById(dispMap[key]).innerText = state[key] + mapUnit[key];
+      sync();
+    }
+
+    function changeTemp(val) {
+      state.temp = (parseInt(val) / 10).toFixed(1);
+      document.getElementById('dispTemp').innerText = state.temp + ' °C';
+      sync();
+    }
+
+    // 追加表示項目（ART, 膀胱温, EtCO2）のON/OFF切替
+    function toggleOptionalDisplay(type) {
+      if (type === 'art') state.artEnabled = !state.artEnabled;
+      if (type === 'temp') state.tempEnabled = !state.tempEnabled;
+      if (type === 'etco2') state.etco2Enabled = !state.etco2Enabled;
+      sync();
+    }
+
+    function setRhythm(r) {
+      state.rhythm = r;
+      state.hasPulse = !(r === 'VF' || r === 'ASYSTOLE' || r === 'PEA');
+      const hrPresets = { VF:0, ASYSTOLE:0, VT:165, PEA:42, AF:115, STE:88, WENCKE:54, MOBITZ2:45, '3AVB':34, NSR:75 };
+      if (hrPresets[r] !== undefined) state.hr = hrPresets[r];
+      const rng = document.getElementById('rngHR');
+      if (rng) { rng.value = state.hr; document.getElementById('dispHR').innerText = state.hr + ' bpm'; }
+      sync();
+    }
+
+    function setIABPRatio(ratio) {
+      state.iabpRatio = ratio;
+      if (ratio !== 'OFF') {
+        state.artEnabled = true; // IABP起動時は自動的に動脈圧波形もONにする
+      }
+      ['off', '11', '12', '13'].forEach(k => {
+        const el = document.getElementById('btn-ratio-' + k);
+        if (el) el.classList.remove('btn-active');
+      });
+      const idMap = { 'OFF':'off', '1:1':'11', '1:2':'12', '1:3':'13' };
+      const target = document.getElementById('btn-ratio-' + idMap[ratio]);
+      if (target) target.classList.add('btn-active');
+      sync();
+    }
+
+    function setTimingAnomaly(timing) { state.iabpTiming = timing; sync(); }
+
+    function toggleCPR() {
+      state.cprActive = !state.cprActive;
+      const btn = document.getElementById('btnCPR');
+      btn.classList.toggle('btn-active', state.cprActive);
+      btn.innerText = state.cprActive ? '👐 CPR 圧迫中' : '👐 CPR 停止中';
+      sync();
+    }
+
+    function togglePulse() {
+      state.hasPulse = !state.hasPulse;
+      const btn = document.getElementById('btnPulse');
+      btn.classList.toggle('btn-active', state.hasPulse);
+      btn.classList.toggle('btn-alert', !state.hasPulse);
+      btn.innerText = state.hasPulse ? '💓 脈あり' : '⚠️ 脈なし (PEA)';
+      sync();
+    }
+
+    function adjEnergy(dir) {
+      state.energyIdx = Math.max(0, Math.min(ENERGY_STEPS.length - 1, state.energyIdx + dir));
+      state.isCharged = false; sync();
+    }
+    function toggleSyncMode() { state.syncMode = !state.syncMode; sync(); }
+    function chargeDefib() {
+      initAudio();
+      setTimeout(() => { state.isCharged = true; playBeep(1400, 0.25, 'square', 0.1); sync(); }, 1200);
+    }
+    function deliverShock() {
+      initAudio(); playBeep(220, 0.3, 'sawtooth', 0.15);
+      state.shockCount++; state.isCharged = false; state.isShocking = true;
+      state.shockArtifactTime = performance.now();
+      sync();
+      setTimeout(() => {
+        state.isShocking = false;
+        if (state.rhythm === 'VF' || state.rhythm === 'VT' || state.syncMode) {
+          setRhythm('NSR'); state.syncMode = false;
+        }
+        sync();
+      }, 1200);
+    }
+
+    // 一時ペーシング切替
+    function togglePacing() { state.pacingActive = !state.pacingActive; sync(); }
+    function adjPaceRate(v) { state.paceRate = Math.max(30, Math.min(180, state.paceRate + v)); sync(); }
+    function adjPaceCurrent(v) { state.paceCurrent = Math.max(0, Math.min(200, state.paceCurrent + v)); sync(); }
+    function toggleHardwarePanel() { document.getElementById('hardwarePanel').classList.toggle('hidden'); setTimeout(setupCanvases, 60); }
+    function toggleMuteAlarm() {
+      state.alarmMuted = !state.alarmMuted;
+      document.getElementById('btnMuteAlarm').classList.toggle('muted', state.alarmMuted);
+      document.getElementById('muteLabel').innerText = state.alarmMuted ? '消音中' : 'アラーム消音';
+    }
+
+    function applyBGA(type) {
+      const presets = {
+        NORMAL: { ph:'7.40', paco2:'40', pao2:'98', hco3:'24.0', be:'0.0', lac:'1.0', k:'4.1', glu:'105' },
+        ACIDOSIS: { ph:'7.14', paco2:'28', pao2:'72', hco3:'11.2', be:'-16.5', lac:'8.4', k:'5.4', glu:'210' },
+        HYPERK: { ph:'7.28', paco2:'36', pao2:'88', hco3:'17.5', be:'-8.2', lac:'2.6', k:'6.8', glu:'130' }
+      };
+      state.bga = presets[type]; sync();
+    }
+    function updateClinicalInfo() {
+      state.physicalText = document.getElementById('inpPhysical').value;
+      state.chartText = document.getElementById('inpChart').value;
+      sync();
+    }
+    function openClinicalModal(type) {
+      const modal = document.getElementById('clinicalModal'), title = document.getElementById('modalTitle'), body = document.getElementById('modalBody');
+      modal.classList.remove('hidden');
+      if (type === 'bga') {
+        title.innerText = '💉 動脈血液ガス分析 (BGA)';
+        const b = state.bga;
+        body.innerHTML = `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-family:monospace; font-size:15px;">
+          <div>pH: <strong>${b.ph}</strong></div><div>PaCO2: <strong>${b.paco2}</strong> mmHg</div>
+          <div>PaO2: <strong>${b.pao2}</strong> mmHg</div><div>HCO3-: <strong>${b.hco3}</strong> mmol/L</div>
+          <div>BE: <strong>${b.be}</strong> mmol/L</div><div>Lactate: <strong style="color:#f87171;">${b.lac}</strong> mmol/L</div>
+          <div>K+: <strong style="color:#fde047;">${b.k}</strong> mEq/L</div><div>Glu: <strong>${b.glu}</strong> mg/dL</div></div>`;
+      } else if (type === 'physical') {
+        title.innerText = '👁️ 身体所見';
+        body.innerHTML = `<p>${state.physicalText}</p>`;
+      } else if (type === 'chart') {
+        title.innerText = '📋 カルテ記録';
+        body.innerHTML = `<p style="white-space:pre-wrap;">${state.chartText}</p>`;
+      } else if (type === '12lead') {
+        title.innerText = '📈 12誘導心電図';
+        body.innerHTML = `<p>現在の調律: <strong>${state.pacingActive ? '心室ペーシング調律' : state.rhythm}</strong></p>`;
+      }
+    }
+    function closeClinicalModal() { document.getElementById('clinicalModal').classList.add('hidden'); }
+
+    // ================= Canvas サイズ＆解像度 安定化制御 =================
+    const canvases = {};
+    function setupCanvases() {
+      const dpr = window.devicePixelRatio || 1;
+      ['ecgCanvas', 'plethCanvas', 'artCanvas', 'balloonCanvas', 'etco2Canvas'].forEach(id => {
+        const c = document.getElementById(id);
+        if (!c) return;
+        const rect = c.parentElement.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        c.width = rect.width * dpr;
+        c.height = rect.height * dpr;
+        const ctx = c.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, rect.width, rect.height);
+        canvases[id] = { ctx, w: rect.width, h: rect.height, prevY: null };
+      });
+      state.sweepX = 0;
+    }
+    window.addEventListener('resize', () => setTimeout(setupCanvases, 60));
+
+    // ================= 添付画像準拠 波形生成エンジン =================
+    const pSin = (x, w) => (x >= 0 && x <= w) ? Math.sin((x / w) * Math.PI) : 0;
+
+    // 1. 心電図（添付画像3枚目：心室ペーシング波形「下向きスパイク＋深い陰性ワイドQRS＋陽性T波」を忠実再現）
+    function calcECG(now) {
+      if (state.isShocking) {
+        const el = (performance.now() - state.shockArtifactTime) / 1000;
+        return el < 0.25 ? (Math.random() > 0.5 ? 1.8 : -1.8) : Math.exp(-el * 3.5) * Math.sin(el * 40);
+      }
+      if (state.cprActive) {
+        return Math.sin((now / 1000) * (110 / 60) * 2 * Math.PI) * 0.85;
+      }
+
+      const p = state.cardiacPhase;
+
+      // ★一時ペーシング作動時（添付画像3枚目の心室ペーシング波形）
+      if (state.pacingActive) {
+        state.lastHadQRS = (state.paceCurrent >= 30);
+        // ① 鋭い下向きペーシングスパイク (p: 0.08 ~ 0.095)
+        if (p >= 0.08 && p < 0.095) {
+          return -1.45;
+        }
+        if (state.lastHadQRS) {
+          // ② 直後に続く幅広い下向き（陰性）QRS波 (p: 0.095 ~ 0.23)
+          if (p >= 0.095 && p < 0.23) {
+            return -Math.sin(((p - 0.095) / 0.135) * Math.PI) * 1.35;
+          }
+          // ③ 緩やかな上向き（陽性）T波 (p: 0.27 ~ 0.48)
+          if (p >= 0.27 && p <= 0.48) {
+            return Math.sin(((p - 0.27) / 0.21) * Math.PI) * 0.62;
+          }
+        }
+        return 0;
+      }
+
+      const r = state.rhythm;
+      if (r === 'ASYSTOLE') { state.lastHadQRS = false; return (Math.random() - 0.5) * 0.03; }
+      if (r === 'VF') { state.lastHadQRS = false; return Math.sin((now/1000)*18)*0.45 + Math.sin((now/1000)*27)*0.3 + (Math.random()-0.5)*0.2; }
+      if (r === 'VT') {
+        state.lastHadQRS = true;
+        return (p < 0.42) ? Math.sin((p/0.42)*Math.PI)*1.3 - 0.2 : -0.2 - Math.sin(((p-0.42)/0.58)*Math.PI)*0.45;
+      }
+
+      state.lastHadQRS = true;
+      if (r === 'WENCKE' && (state.wenckCounter % 4 === 3)) { state.lastHadQRS = false; return pSin(p - 0.05, 0.08) * 0.18; }
+      if (r === 'MOBITZ2' && (state.mobitzCounter % 3 === 2)) { state.lastHadQRS = false; return pSin(p - 0.05, 0.08) * 0.18; }
+
+      let v = (r === 'AF') ? (Math.random() - 0.5) * 0.10 : pSin(p - 0.06, 0.08) * 0.18;
+      if (p > 0.19 && p < 0.21) v -= 0.15;
+      else if (p >= 0.21 && p <= 0.25) v += 1.30;
+      else if (p > 0.25 && p <= 0.28) v -= 0.25;
+      else if (p > 0.28 && p < 0.42 && r === 'STE') v += 0.40;
+      else if (p >= 0.42 && p <= 0.58) v += pSin(p - 0.42, 0.16) * (r === 'STE' ? 0.45 : 0.28);
+      return v;
+    }
+
+    // 2. SpO2 プレチスモグラフ（心拍位相 p と完全連動）
+    function calcPleth(now) {
+      if (state.cprActive) return Math.abs(Math.sin((now/1000)*(110/60)*Math.PI)) * 0.45;
+      if (!state.hasPulse || !state.lastHadQRS || state.isShocking) return 0;
+      const pos = (state.cardiacPhase - 0.22 + 1.0) % 1.0;
+      if (pos < 0.22) return Math.sin((pos / 0.22) * (Math.PI / 2));
+      if (pos < 0.38) return 1.0 - ((pos - 0.22) / 0.16) * 0.35;
+      if (pos < 0.50) return 0.65 + Math.sin(((pos - 0.38) / 0.12) * Math.PI) * 0.10;
+      return 0.65 * Math.exp(-((pos - 0.50) / 0.50) * 2.4);
+    }
+
+    // 3. 動脈圧 (ART) ＆ IABP波形（添付画像1枚目・2枚目を忠実に数式モデル化、心拍位相と完全連動）
+    function calcART(now) {
+      if (state.cprActive) return 25 + Math.abs(Math.sin((now/1000)*(110/60)*Math.PI)) * 55;
+      if (!state.hasPulse || state.isShocking) return 15;
+      if (!state.lastHadQRS) return state.dia * 0.92;
+
+      const pos = (state.cardiacPhase - 0.18 + 1.0) % 1.0;
+      const sys = state.sys;
+      const dia = state.dia;
+      const pulsePressure = sys - dia;
+
+      let isAssisted = false;
+      let prevBeatAssisted = false;
+      if (state.iabpRatio === '1:1') { isAssisted = true; prevBeatAssisted = true; }
+      else if (state.iabpRatio === '1:2') { isAssisted = (state.beatCounter % 2 === 1); prevBeatAssisted = (state.beatCounter % 2 === 0); }
+      else if (state.iabpRatio === '1:3') { isAssisted = (state.beatCounter % 3 === 1); prevBeatAssisted = (state.beatCounter % 3 === 2); }
+
+      // 【A】IABPなしの状態（添付画像1枚目：正常動脈圧波形）
+      // 真上気味に登る → 山が尖りすぎない丸いピーク → 大動脈弁閉鎖のディクロティックノッチ → 早めに減衰
+      if (!isAssisted && !prevBeatAssisted || state.iabpRatio === 'OFF') {
+        if (pos < 0.14) {
+          // 急峻な立ち上がり
+          return dia + Math.pow(Math.sin((pos / 0.14) * (Math.PI / 2)), 0.8) * pulsePressure;
+        } else if (pos < 0.24) {
+          // 丸みのある山頂（オーバーシュートしない）
+          return sys - Math.pow((pos - 0.14) / 0.10, 1.6) * (pulsePressure * 0.22);
+        } else if (pos < 0.34) {
+          // ディクロティックノッチ（大動脈弁閉鎖のくぼみ）へ向かう下降
+          return dia + pulsePressure * 0.78 - ((pos - 0.24) / 0.10) * (pulsePressure * 0.36);
+        } else if (pos < 0.44) {
+          // ディクロティックノッチの小さな山（バウンス）
+          const notchBase = dia + pulsePressure * 0.42;
+          return notchBase + Math.sin(((pos - 0.34) / 0.10) * Math.PI) * (pulsePressure * 0.14);
+        } else {
+          // 拡張期の緩やかな減衰
+          const startDecay = dia + pulsePressure * 0.42;
+          return dia + (startDecay - dia) * Math.exp(-((pos - 0.44) / 0.56) * 3.2);
+        }
+      }
+
+      // 【B】IABPありの状態（添付画像2枚目：拡張期血圧の上昇 Augmentation ＋ 後負荷軽減による深い谷）
+      const startDia = prevBeatAssisted ? Math.max(15, dia - 14) : dia; // 前拍アシストによる拡張末期圧低下
+      const assistedSys = prevBeatAssisted ? (sys - 8) : sys;          // 後負荷軽減による収縮期ピーク低下
+      const augPeak = sys + Math.max(18, Math.round(pulsePressure * 0.38)); // 収縮期より高い拡張期Augmentation山
+      const endDropDia = isAssisted ? Math.max(15, dia - 14) : dia;    // 左室からの汲み上げによる深い谷
+
+      let inflP = 0.34, deflP = 0.84;
+      if (state.iabpTiming === 'EARLY_INF') inflP = 0.20;
+      if (state.iabpTiming === 'LATE_INF') inflP = 0.48;
+      if (state.iabpTiming === 'EARLY_DEF') deflP = 0.64;
+
+      if (!isAssisted) {
+        // 1:2や1:3における「前拍のみアシストされた非アシスト拍」
+        if (pos < 0.18) return startDia + Math.sin((pos / 0.18) * (Math.PI / 2)) * (assistedSys - startDia);
+        if (pos < 0.34) return assistedSys - ((pos - 0.18) / 0.16) * ((assistedSys - dia) * 0.55);
+        if (pos < 0.44) return dia + (assistedSys - dia) * 0.45 + Math.sin(((pos - 0.34) / 0.10) * Math.PI) * (pulsePressure * 0.12);
+        return dia + ((assistedSys - dia) * 0.45) * Math.exp(-((pos - 0.44) / 0.56) * 3.0);
+      }
+
+      // アシスト拍（収縮期山 → ディクロティックノッチ → 高い拡張期Augmentation山 → 後負荷軽減の深い谷）
+      if (pos < 0.16) {
+        return startDia + Math.sin((pos / 0.16) * (Math.PI / 2)) * (assistedSys - startDia);
+      } else if (pos < inflP) {
+        const notchVal = dia + pulsePressure * 0.48;
+        return assistedSys - ((pos - 0.16) / (inflP - 0.16)) * (assistedSys - notchVal);
+      } else if (pos < deflP) {
+        const notchVal = dia + pulsePressure * 0.48;
+        const pAug = (pos - inflP) / (deflP - inflP);
+        if (pAug < 0.45) {
+          return notchVal + Math.sin((pAug / 0.45) * (Math.PI / 2)) * (augPeak - notchVal);
+        } else {
+          return augPeak - Math.pow((pAug - 0.45) / 0.55, 1.3) * (augPeak - endDropDia);
+        }
+      } else {
+        // バルーン収縮による鋭い圧低下谷（後負荷軽減）
+        const pTail = (pos - deflP) / (1.0 - deflP);
+        return endDropDia - Math.sin(pTail * Math.PI) * 4;
+      }
+    }
+
+    // 4. IABP バルーン内圧波形（心拍位相と連動）
+    function calcBalloonPressure() {
+      if (state.iabpRatio === 'OFF' || !state.hasPulse || !state.lastHadQRS) return 0;
+      let isAssisted = (state.iabpRatio === '1:1') || (state.iabpRatio === '1:2' && state.beatCounter % 2 === 1) || (state.iabpRatio === '1:3' && state.beatCounter % 3 === 1);
+      if (!isAssisted) return 0;
+      const pos = (state.cardiacPhase - 0.18 + 1.0) % 1.0;
+      let inflP = state.iabpTiming === 'EARLY_INF' ? 0.20 : (state.iabpTiming === 'LATE_INF' ? 0.48 : 0.34);
+      let deflP = state.iabpTiming === 'EARLY_DEF' ? 0.64 : 0.84;
+      if (pos >= inflP && pos < deflP) return (pos - inflP < 0.03) ? 1.2 : 1.0;
+      return 0;
+    }
+
+    // 5. EtCO2
+    function calcEtCO2() {
+      if (!state.etco2Enabled) return 0;
+      const target = (!state.hasPulse && !state.cprActive) ? 5 : (state.cprActive ? 18 : state.etco2);
+      const p = state.respPhase;
+      if (p < 0.45) return p < 0.06 ? (p / 0.06) * target : target;
+      if (p < 0.50) return target * (1.0 - (p - 0.45) / 0.05);
+      return 0;
+    }
+
+    // ================= メイン描画ループ（サイズ崩れゼロ設計） =================
+    let lastTime = performance.now();
+    function mainDrawLoop(now) {
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      // 実効心拍数（ペーシングON時はペーシングレート、それ以外はHRに完全連動）
+      const activeRate = state.pacingActive ? state.paceRate : ((state.rhythm === 'VF' || state.rhythm === 'ASYSTOLE') ? 0 : state.hr);
+      const prevPhase = state.cardiacPhase;
+      state.cardiacPhase = (state.cardiacPhase + (activeRate / 60) * dt) % 1.0;
+
+      if (prevPhase > 0.8 && state.cardiacPhase < 0.2) {
+        state.beatCounter++; state.wenckCounter++; state.mobitzCounter++;
+        if (state.hasPulse && activeRate > 0) playBeep(440 + state.spo2 * 4, 0.04, 'sine', 0.04);
+      }
+      state.respPhase = (state.respPhase + (state.rr / 60) * dt) % 1.0;
+
+      const ecgObj = canvases['ecgCanvas'];
+      if (!ecgObj || ecgObj.w === 0) {
+        requestAnimationFrame(mainDrawLoop);
+        return;
+      }
+
+      const x = state.sweepX;
+      const nextX = x + 2.2;
+
+      // 波形ごとの正規化Y座標計算（常に各Canvasの 12%〜88% の高さ内に収める）
+      const drawWave = (id, normVal, color) => {
+        const obj = canvases[id];
+        if (!obj || obj.w === 0) return;
+        const { ctx, h } = obj;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x, 0, 14, h);
+        const clamped = Math.max(-0.1, Math.min(1.1, normVal));
+        const y = h * 0.86 - clamped * (h * 0.72);
+        if (obj.prevY !== null && x > 0) {
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2.2;
+          ctx.moveTo(x, obj.prevY);
+          ctx.lineTo(nextX, y);
+          ctx.stroke();
+        }
+        obj.prevY = y;
+      };
+
+      // 1. ECG（-1.5〜+1.5 を 0〜1 に正規化）
+      const ecgRaw = calcECG(now);
+      drawWave('ecgCanvas', (ecgRaw + 1.5) / 3.0, '#10b981');
+
+      // 2. SpO2（0〜1.1 を正規化）
+      drawWave('plethCanvas', calcPleth(now), '#06b6d4');
+
+      // 3. ART（0〜220 mmHg を 0〜1 に正規化）
+      if (state.artEnabled) {
+        const artColor = state.iabpRatio !== 'OFF' ? '#fde047' : '#ef4444';
+        drawWave('artCanvas', calcART(now) / 220, artColor);
+      }
+
+      // 4. IABP バルーン圧
+      if (state.iabpRatio !== 'OFF') {
+        drawWave('balloonCanvas', calcBalloonPressure() / 1.3, '#38bdf8');
+      }
+
+      // 5. EtCO2
+      if (state.etco2Enabled) {
+        drawWave('etco2Canvas', calcEtCO2() / 55, '#facc15');
+      }
+
+      state.sweepX = nextX >= ecgObj.w ? 0 : nextX;
+      if (state.sweepX === 0) {
+        Object.values(canvases).forEach(o => o.prevY = null);
+      }
+
+      requestAnimationFrame(mainDrawLoop);
+    }
+
+    // ================= UI ＆ レイアウト更新 =================
+    function refreshMonitorLayoutAndUI() {
+      const boxART = document.getElementById('boxART');
+      const boxValART = document.getElementById('boxValART');
+      const boxBalloon = document.getElementById('boxBalloon');
+      const boxEtCO2 = document.getElementById('boxEtCO2');
+      const boxValEtCO2 = document.getElementById('boxValEtCO2');
+      const boxValTemp = document.getElementById('boxValTemp');
+
+      let needResize = false;
+      const toggleBox = (el, show) => {
+        if (el.classList.contains('hidden') === show) {
+          el.classList.toggle('hidden', !show);
+          needResize = true;
+        }
+      };
+
+      toggleBox(boxART, state.artEnabled);
+      toggleBox(boxValART, state.artEnabled);
+      toggleBox(boxBalloon, state.iabpRatio !== 'OFF');
+      toggleBox(boxEtCO2, state.etco2Enabled);
+      toggleBox(boxValEtCO2, state.etco2Enabled);
+      boxValTemp.classList.toggle('hidden', !state.tempEnabled);
+
+      if (needResize) setTimeout(setupCanvases, 50);
+
+      const isArrest = (!state.hasPulse || state.rhythm === 'VF' || state.rhythm === 'ASYSTOLE');
+      const dispHRVal = state.pacingActive ? state.paceRate : state.hr;
+      document.getElementById('valHR').innerText = (state.rhythm === 'VF' || state.rhythm === 'ASYSTOLE') && !state.pacingActive ? '--' : dispHRVal;
+      document.getElementById('rhythmLabel').innerText = state.pacingActive ? 'PACED' : state.rhythm;
+      document.getElementById('valSpO2').innerText = isArrest ? '--' : state.spo2;
+
+      // ART 収縮期 / 拡張期 (平均血圧) ＆ IABP AUG表示
+      const mapVal = calcMAP(state.sys, state.dia);
+      document.getElementById('valSys').innerText = isArrest ? '--' : state.sys;
+      document.getElementById('valDia').innerText = isArrest ? '--' : state.dia;
+      document.getElementById('valMAP').innerText = isArrest ? '(--)' : `(${mapVal})`;
+
+      const valAUG = document.getElementById('valAUG');
+      const iabpSub = document.getElementById('iabpWaveSubLabel');
+      if (state.iabpRatio !== 'OFF' && !isArrest) {
+        const augPeak = state.sys + Math.max(18, Math.round((state.sys - state.dia) * 0.38));
+        valAUG.classList.remove('hidden');
+        valAUG.innerText = `AUG: ${augPeak}`;
+        iabpSub.classList.remove('hidden');
+      } else {
+        valAUG.classList.add('hidden');
+        iabpSub.classList.add('hidden');
+      }
+
+      document.getElementById('valRR').innerText = state.rr;
+      document.getElementById('valTemp').innerText = state.temp;
+      document.getElementById('valEtCO2').innerText = state.etco2;
+
+      document.getElementById('pacingBadge').classList.toggle('hidden', !state.pacingActive);
+      document.getElementById('iabpStatusTag').classList.toggle('hidden', state.iabpRatio === 'OFF');
+      document.getElementById('iabpStatusTag').innerText = `IABP ${state.iabpRatio}`;
+
+      // 実機パネル更新
+      document.getElementById('hwEnergyVal').innerText = ENERGY_STEPS[state.energyIdx];
+      const shockBtn = document.getElementById('hwShockBtn');
+      shockBtn.disabled = !state.isCharged;
+      shockBtn.classList.toggle('ready', state.isCharged);
+      document.getElementById('hwPaceRate').innerText = state.paceRate;
+      document.getElementById('hwPaceCurrent').innerText = state.paceCurrent;
+      document.getElementById('hwPaceBtn').innerText = state.pacingActive ? '停止' : '開始';
+      document.getElementById('hwPaceBtn').classList.toggle('btn-active', state.pacingActive);
+    }
+
+    function refreshControllerUI() {
+      const mHR = document.getElementById('miniHR');
+      if (!mHR) return;
+      const dispHRVal = state.pacingActive ? state.paceRate : state.hr;
+      const mapVal = calcMAP(state.sys, state.dia);
+      mHR.innerText = `${dispHRVal} (${state.pacingActive ? 'PACED' : state.rhythm})`;
+      document.getElementById('miniBP').innerText = state.hasPulse ? `${state.sys}/${state.dia} (${mapVal})` : '脈なし';
+      document.getElementById('miniSpO2').innerText = state.hasPulse ? `${state.spo2}%` : '--%';
+
+      const setBtnState = (id, enabled, label) => {
+        const b = document.getElementById(id);
+        if (!b) return;
+        b.classList.toggle('btn-active', enabled);
+        b.innerHTML = `${label}<br><span style="font-size:10px;">${enabled ? '表示中 (ON)' : 'OFF'}</span>`;
+      };
+      setBtnState('btnToggleART', state.artEnabled, '📈 動脈圧(ART)');
+      setBtnState('btnToggleTemp', state.tempEnabled, '🌡️ 膀胱温(右下)');
+      setBtnState('btnToggleEtCO2', state.etco2Enabled, '🫁 EtCO2波形');
+
+      const cpBtn = document.getElementById('ctrlPaceBtn');
+      if (cpBtn) cpBtn.classList.toggle('btn-active', state.pacingActive);
+      const cpRate = document.getElementById('ctrlPaceRate');
+      if (cpRate) cpRate.innerText = state.paceRate;
+    }
+
+    function tickTimer() {
+      simSeconds++;
+      const m = String(Math.floor(simSeconds / 60)).padStart(2, '0'), s = String(simSeconds % 60).padStart(2, '0');
+      document.getElementById('simTimer').innerText = `経過 ${m}:${s}`;
+      document.getElementById('clockText').innerText = new Date().toTimeString().split(' ')[0];
+    }
+
+    // NBP測定（平均血圧も一緒に表示）
+    function measureNIBP() {
+      document.getElementById('valNIBP').innerText = '測定中...';
+      setTimeout(() => {
+        if (state.hasPulse) {
+          const mapVal = calcMAP(state.sys, state.dia);
+          document.getElementById('valNIBP').innerText = `${state.sys}/${state.dia} (${mapVal})`;
+        } else {
+          document.getElementById('valNIBP').innerText = '-- / -- (--)';
+        }
+      }, 1800);
+    }
+  </script>
+</body>
+</html>
